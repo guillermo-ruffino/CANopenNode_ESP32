@@ -145,6 +145,15 @@ extern "C"
         rxNew = NULL;        \
     }
 
+#if CONFIG_CO_SDO_CLIENT_ENABLE
+#define CO_CONFIG_FIFO CO_CONFIG_FIFO_ENABLE
+#define CO_CONFIG_SDO_CLI CO_CONFIG_SDO_CLI_ENABLE
+#endif
+
+#if CONFIG_CO_CONFIG_NMT_MASTER
+#define CO_CONFIG_NMT CO_CONFIG_NMT_MASTER
+#endif
+
 /* Stack configuration override default values.
  * For more information see file CO_config.h. */
 #if CONFIG_CO_LED_ENABLE

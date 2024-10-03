@@ -353,6 +353,11 @@ CO_CANtx_t *CO_CANtxBufferInit(
 /******************************************************************************/
 CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
 {
+    if (uxTaskPriorityGet(NULL) >= CONFIG_CO_TX_TASK_PRIORITY)
+    {
+        ESP_LOGE(TAG, "Calling task priority should be lower than tx task priority");
+    }
+
     CO_ReturnError_t err = CO_ERROR_NO;
 
     /* Verify overflow */
@@ -367,7 +372,7 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
     }
 
 #if CONFIG_CO_DEBUG_DRIVER_CAN_SEND
-    ESP_LOGI(TAG, "CANTX id: 0x%lx, dlc: %d, data: [%d %d %d %d %d %d %d %d]",
+    ESP_LOGI(TAG, "CANTX id: %#03lx, dlc: %d, data: [%02x %02x %02x %02x %02x %02x %02x %02x]",
              buffer->ident,
              buffer->DLC,
              buffer->data[0],

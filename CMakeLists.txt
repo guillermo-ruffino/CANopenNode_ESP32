@@ -30,6 +30,11 @@ if(CONFIG_USE_CANOPENNODE)
     "${co_port_dir}")
 endif() #CONFIG_USE_CANOPENNODE
 
+if(CONFIG_CO_SDO_CLIENT_ENABLE)
+  list(APPEND srcs
+  "${co_dir}/301/CO_SDOclient.c")
+endif() #CONFIG_CO_SDO_CLIENT_ENABLE 
+
 if(CONFIG_CO_LED_ENABLE)
   list(APPEND srcs
     "${co_dir}/303/CO_LEDs.c")

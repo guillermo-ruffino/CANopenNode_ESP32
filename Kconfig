@@ -163,6 +163,9 @@ menuconfig USE_CANOPENNODE
                         default y
                 endmenu
             endif #CO_LED_ENABLE
+        config CO_TIME_PRODUCER
+            bool "TIME producer"
+            default n
         menu "Debug"
             config CO_DEBUG_SDO
                 bool "SDO client/server"

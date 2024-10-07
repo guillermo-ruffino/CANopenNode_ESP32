@@ -154,6 +154,16 @@ extern "C"
 #define CO_CONFIG_NMT CO_CONFIG_NMT_MASTER
 #endif
 
+#define CO_CONFIG_TIME_BASE (CO_CONFIG_TIME_ENABLE |              \
+                             CO_CONFIG_GLOBAL_FLAG_CALLBACK_PRE | \
+                             CO_CONFIG_GLOBAL_FLAG_OD_DYNAMIC)
+
+#ifdef CONFIG_CO_TIME_PRODUCER
+#define CO_CONFIG_TIME (CO_CONFIG_TIME_BASE | CO_CONFIG_TIME_PRODUCER)
+#else
+#define CO_CONFIG_TIME CO_CONFIG_TIME_BASE
+#endif
+
 /* Stack configuration override default values.
  * For more information see file CO_config.h. */
 #if CONFIG_CO_LED_ENABLE

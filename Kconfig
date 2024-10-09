@@ -118,7 +118,7 @@ menuconfig USE_CANOPENNODE
                 default 4096
             config CO_TX_TASK_PRIORITY
                 int "Tx Task priority"
-                default 5
+                default 15
         endmenu
         config CO_DEFAULT_NODE_ID
             int "Node ID"

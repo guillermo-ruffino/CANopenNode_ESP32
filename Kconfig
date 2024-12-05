@@ -129,6 +129,9 @@ menuconfig USE_CANOPENNODE
         config CO_SDO_SERVER_TIMEOUT
             int "SDO Server Timeout (ms)"
             default 2000
+        config CO_SDO_SERVER_BLOCK_TRANSFER
+            bool "SDO Server block transfer"
+            default n
         config CO_CONFIG_NMT_MASTER
             bool "Enable simple NMT master"
             default n

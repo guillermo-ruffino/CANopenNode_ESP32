@@ -182,9 +182,16 @@ extern "C"
 #define CO_CONFIG_GLOBAL_RT_FLAG_CALLBACK_PRE CO_CONFIG_FLAG_CALLBACK_PRE
 #endif
 
-#define CO_CONFIG_FIFO CO_CONFIG_FIFO_ENABLE
-#define CO_CONFIG_SDO_CLI CO_CONFIG_SDO_CLI_ENABLE
-#define CO_CONFIG_NMT CO_CONFIG_NMT_MASTER
+#if CONFIG_CO_SDO_SERVER_BLOCK
+#define CO_CONFIG_SDO_SRV_BUFFER_SIZE 900
+#define CO_CONFIG_CRC16 CO_CONFIG_CRC16_ENABLE
+#define CO_CONFIG_SDO_SRV (CO_CONFIG_SDO_SRV_SEGMENTED |        \
+                           CO_CONFIG_SDO_SRV_BLOCK |            \
+                           CO_CONFIG_GLOBAL_FLAG_CALLBACK_PRE | \
+                           CO_CONFIG_GLOBAL_FLAG_TIMERNEXT |    \
+                           CO_CONFIG_GLOBAL_FLAG_OD_DYNAMIC |   \
+                           CO_CONFIG_FLAG_CALLBACK_PRE)
+#endif
 
 #ifdef __cplusplus
 }

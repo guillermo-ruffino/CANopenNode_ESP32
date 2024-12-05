@@ -17,7 +17,6 @@ if(CONFIG_USE_CANOPENNODE)
     "${co_dir}/301/CO_NMT_Heartbeat.c"
     "${co_dir}/301/CO_ODinterface.c"
     "${co_dir}/301/CO_PDO.c"
-    "${co_dir}/301/CO_SDOclient.c"
     "${co_dir}/301/CO_SDOserver.c"
     "${co_dir}/301/CO_SYNC.c"
     "${co_dir}/301/CO_TIME.c"
@@ -39,6 +38,11 @@ if(CONFIG_CO_LED_ENABLE)
   list(APPEND srcs
     "${co_dir}/303/CO_LEDs.c")
 endif() #CONFIG_CO_LED_ENABLE
+
+if (CONFIG_CO_SDO_SERVER_BLOCK_TRANSFER)
+list(APPEND srcs
+  "${co_dir}/301/crc16-ccitt.c")
+endif() #CONFIG_CO_SDO_SERVER_BLOCK_TRANSFER
 
 idf_component_register(SRCS ${srcs}
                     INCLUDE_DIRS ${include_dirs}

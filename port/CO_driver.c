@@ -353,11 +353,6 @@ CO_CANtx_t *CO_CANtxBufferInit(
 /******************************************************************************/
 CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
 {
-    if (uxTaskPriorityGet(NULL) >= CONFIG_CO_TX_TASK_PRIORITY)
-    {
-        ESP_LOGE(TAG, "Calling task priority should be lower than tx task priority");
-    }
-
     CO_ReturnError_t err = CO_ERROR_NO;
 
     CO_LOCK_CAN_SEND(CANmodule);

@@ -192,6 +192,14 @@ extern "C"
                            CO_CONFIG_GLOBAL_FLAG_OD_DYNAMIC |   \
                            CO_CONFIG_FLAG_CALLBACK_PRE)
 #endif
+#if CONFIG_CO_CONFIG_EM_CONSUMER
+// Default CO_CONFIG_EM + CO_CONFIG_EM_CONSUMER
+#define CO_CONFIG_EM (CO_CONFIG_EM_PRODUCER |              \
+                      CO_CONFIG_EM_HISTORY |               \
+                      CO_CONFIG_GLOBAL_FLAG_CALLBACK_PRE | \
+                      CO_CONFIG_GLOBAL_FLAG_TIMERNEXT |    \
+                      CO_CONFIG_EM_CONSUMER)
+#endif
 
 #ifdef __cplusplus
 }

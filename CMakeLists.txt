@@ -44,6 +44,12 @@ list(APPEND srcs
   "${co_dir}/301/crc16-ccitt.c")
 endif() #CONFIG_CO_SDO_SERVER_BLOCK_TRANSFER
  
+if(CONFIG_CO_STORAGE)
+list(APPEND srcs
+  "${co_dir}/storage/CO_storage.c"
+  "${co_port_dir}/CO_nvs.c")
+endif()
+
 idf_component_register(SRCS ${srcs}
                     INCLUDE_DIRS ${include_dirs}
                     PRIV_INCLUDE_DIRS ${private_include_dirs}

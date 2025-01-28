@@ -193,6 +193,10 @@ extern "C"
                            CO_CONFIG_FLAG_CALLBACK_PRE)
 #endif
 
+#if CONFIG_CO_STORAGE
+#define CO_CONFIG_STORAGE (CO_CONFIG_STORAGE_ENABLE)
+#endif
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

@@ -166,6 +166,9 @@ menuconfig USE_CANOPENNODE
         config CO_TIME_PRODUCER
             bool "TIME producer"
             default n
+        config CO_STORAGE
+            bool "Storage on NVS"
+            default n
         menu "Debug"
             config CO_DEBUG_SDO
                 bool "SDO client/server"

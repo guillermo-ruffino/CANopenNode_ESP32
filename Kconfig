@@ -164,7 +164,10 @@ menuconfig USE_CANOPENNODE
                 endmenu
             endif #CO_LED_ENABLE
         config CO_TIME_PRODUCER
-            bool "TIME producer"
+            bool "TIME Producer"
+            default n
+        config CO_CONFIG_EM_CONSUMER
+            bool "EM Consumer"
             default n
         config CO_STORAGE
             bool "Storage on NVS"

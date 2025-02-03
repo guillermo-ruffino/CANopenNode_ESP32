@@ -141,6 +141,15 @@ menuconfig USE_CANOPENNODE
         config CO_SDO_CLIENT_TIMEOUT
             int "SDO Client Timeout (ms)"
             default 500
+        config CO_SDO_CLI_SEGMENTED
+            bool "SDO Client Segmented"
+            default n
+        config CO_TIME_PRODUCER
+            bool "TIME Producer"
+            default n
+        config CO_CONFIG_EM_CONSUMER
+            bool "EM Consumer"
+            default n
         menuconfig CO_LED_ENABLE
             bool "CiA 303-3 (LED indicator)"
             if CO_LED_ENABLE
@@ -163,12 +172,6 @@ menuconfig USE_CANOPENNODE
                         default y
                 endmenu
             endif #CO_LED_ENABLE
-        config CO_TIME_PRODUCER
-            bool "TIME Producer"
-            default n
-        config CO_CONFIG_EM_CONSUMER
-            bool "EM Consumer"
-            default n
         menu "Debug"
             config CO_DEBUG_SDO
                 bool "SDO client/server"

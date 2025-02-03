@@ -355,8 +355,6 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
 {
     CO_ReturnError_t err = CO_ERROR_NO;
 
-    CO_LOCK_CAN_SEND(CANmodule);
-
     /* Verify overflow */
     if (buffer->bufferFull)
     {
@@ -382,9 +380,24 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
              buffer->data[7]);
 #endif
 
-    buffer->bufferFull = true;
-    CANmodule->CANtxCount++;
-    xTaskNotify(xCoTxTaskHandle, 0, eNoAction);
+    CO_LOCK_CAN_SEND(CANmodule);
+
+    twai_message_t tx_msg;
+    memset(&tx_msg, 0, sizeof(tx_msg));
+    tx_msg.identifier = buffer->ident;
+    tx_msg.data_length_code = buffer->DLC;
+    memcpy(tx_msg.data, buffer->data, buffer->DLC);
+
+    esp_err_t espRet = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));
+    if (ESP_OK != espRet)
+    {
+        ESP_LOGE(TAG, "Failed Tx. ident:%#2lx err:0x%x", buffer->ident, espRet);
+
+        buffer->bufferFull = true;
+        CANmodule->CANtxCount++;
+        xTaskNotify(xCoTxTaskHandle, 0, eNoAction);
+    }
+
     CO_UNLOCK_CAN_SEND(CANmodule);
 
     return err;

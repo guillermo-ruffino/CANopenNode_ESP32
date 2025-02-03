@@ -75,15 +75,28 @@ extern "C"
         void (*CANrx_callback)(void *object, void *message);
     } CO_CANrx_t;
 
-    /* Transmit message object */
+    /**
+     * Configuration object for CAN transmit message for specific \ref CO_obj
+     * "CANopenNode Object".
+     *
+     * Must be defined in the **CO_driver_target.h** file.
+     *
+     * Data fields of this structure are used exclusively by the driver. Usually it
+     * has the following data fields, but they may differ for different
+     * microcontrollers. Array of multiple CO_CANtx_t objects is included inside
+     * CO_CANmodule_t.
+     */
     typedef struct
     {
-        uint32_t ident;
-        uint8_t DLC;
-        uint8_t data[8];
-        volatile bool_t bufferFull;
-        volatile bool_t syncFlag;
+        uint32_t ident;             /**< CAN identifier as aligned in CAN module */
+        uint8_t DLC;                /**< Length of CAN message */
+        uint8_t data[8];            /**< 8 data bytes */
+        volatile bool_t bufferFull; /**< True if previous message is still in the
+                                         buffer */
+        volatile bool_t syncFlag;   /**< Synchronous PDO messages has this flag set.
+                      It prevents them to be sent outside the synchronous window */
     } CO_CANtx_t;
+    /** @} */
 
     /* CAN module object */
     typedef struct
@@ -147,7 +160,12 @@ extern "C"
 
 #if CONFIG_CO_SDO_CLIENT_ENABLE
 #define CO_CONFIG_FIFO CO_CONFIG_FIFO_ENABLE
+#if CONFIG_CO_SDO_CLI_SEGMENTED
+#define CO_CONFIG_SDO_CLI (CO_CONFIG_SDO_CLI_ENABLE | CO_CONFIG_SDO_CLI_SEGMENTED)
+#else
 #define CO_CONFIG_SDO_CLI CO_CONFIG_SDO_CLI_ENABLE
+#endif
+
 #endif
 
 #if CONFIG_CO_CONFIG_NMT_MASTER

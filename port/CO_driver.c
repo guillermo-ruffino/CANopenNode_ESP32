@@ -533,6 +533,7 @@ static void CO_txTask(void *pxParam)
     CO_CANmodule_t *CANmodule = (CO_CANmodule_t *)pxParam;
     ESP_LOGI(TAG, "tx task running");
 
+    int err_invalid_state_count = 0;
     while (1)
     {
         xTaskNotifyWait(ULONG_MAX, ULONG_MAX, &notificationValue, portMAX_DELAY);
@@ -560,10 +561,19 @@ static void CO_txTask(void *pxParam)
                     if (ESP_OK == espRet)
                     {
                         pCanTx->bufferFull = false;
+                        err_invalid_state_count = 0;
                     }
                     else
                     {
                         ESP_LOGE(TAG, "Failed Tx. id:%d err:0x%x", i, espRet);
+                        if (espRet == ESP_ERR_INVALID_STATE)
+                        {
+                            err_invalid_state_count++;
+
+                            ESP_LOGE(TAG, "Err Invalid state count is %d, will restart at 10", err_invalid_state_count);
+                            if (err_invalid_state_count == 10)
+                                esp_restart();
+                        }
                     }
                     CANmodule->CANtxCount--;
                     CANmodule->bufferInhibitFlag = pCanTx->syncFlag;

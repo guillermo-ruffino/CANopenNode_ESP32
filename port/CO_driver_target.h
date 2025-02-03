@@ -219,6 +219,10 @@ extern "C"
                       CO_CONFIG_EM_CONSUMER)
 #endif
 
+#if CONFIG_CO_STORAGE
+#define CO_CONFIG_STORAGE (CO_CONFIG_STORAGE_ENABLE)
+#endif
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

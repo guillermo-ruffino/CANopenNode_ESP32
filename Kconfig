@@ -172,8 +172,6 @@ menuconfig USE_CANOPENNODE
                         default y
                 endmenu
             endif #CO_LED_ENABLE
-<<<<<<< HEAD
-=======
         config CO_TIME_PRODUCER
             bool "TIME Producer"
             default n
@@ -183,7 +181,6 @@ menuconfig USE_CANOPENNODE
         config CO_STORAGE
             bool "Storage on NVS"
             default n
->>>>>>> c039a6eb37f7766b85d8283c06fd116e666a1aa9
         menu "Debug"
             config CO_DEBUG_SDO
                 bool "SDO client/server"

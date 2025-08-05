@@ -431,11 +431,6 @@ void CO_CANclearPendingSyncPDOs(CO_CANmodule_t *CANmodule)
     }
 }
 
-/******************************************************************************/
-/* Get error counters from the module. If necessary, function may use
- * different way to determine errors. */
-static uint16_t rxErrors = 0, txErrors = 0, overflow = 0;
-
 void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
 {
     uint32_t err;
@@ -449,9 +444,12 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
         return;
     }
 
-    txErrors = (uint16_t)(statusInfo.tx_error_counter);
-    rxErrors = (uint16_t)(statusInfo.rx_error_counter);
-    overflow = (uint16_t)(statusInfo.rx_overrun_count);
+    /******************************************************************************/
+    /* Get error counters from the module. If necessary, function may use
+     * different way to determine errors. */
+    uint8_t rxErrors = statusInfo.rx_error_counter;
+    uint8_t txErrors = statusInfo.tx_error_counter;
+    uint8_t overflow = statusInfo.rx_overrun_count;
 
     err = ((uint32_t)txErrors << 16) | ((uint32_t)rxErrors << 8) | overflow;
 
@@ -503,6 +501,7 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
         if (overflow != 0)
         {
             /* CAN RX bus overflow */
+            ESP_LOGI(TAG, "Set overflow error");
             status |= CO_CAN_ERRRX_OVERFLOW;
         }
 

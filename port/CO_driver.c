@@ -358,9 +358,21 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
     /* Verify overflow */
     if (buffer->bufferFull)
     {
+        /* don't set error, if bootup message is still on buffers */
         if (!CANmodule->firstCANtxMessage)
         {
-            /* don't set error, if bootup message is still on buffers */
+            ESP_LOGE(TAG, "Overflow CANTX CANtxCount: %d send data: id: %#03lx, dlc: %d, data: [%02x %02x %02x %02x %02x %02x %02x %02x]",
+                     CANmodule->CANtxCount++,
+                     buffer->ident,
+                     buffer->DLC,
+                     buffer->data[0],
+                     buffer->data[1],
+                     buffer->data[2],
+                     buffer->data[3],
+                     buffer->data[4],
+                     buffer->data[5],
+                     buffer->data[6],
+                     buffer->data[7]);
             CANmodule->CANerrorStatus |= CO_CAN_ERRTX_OVERFLOW;
         }
         err = CO_ERROR_TX_OVERFLOW;
@@ -396,6 +408,12 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
         buffer->bufferFull = true;
         CANmodule->CANtxCount++;
         xTaskNotify(xCoTxTaskHandle, 0, eNoAction);
+    }
+    else if (buffer->bufferFull)
+    {
+        // buffer already overwritten anyway
+        ESP_LOGW(TAG, "Cleared bufferFull ident:%#2lx", buffer->ident);
+        buffer->bufferFull = false;
     }
 
     CO_UNLOCK_CAN_SEND(CANmodule);

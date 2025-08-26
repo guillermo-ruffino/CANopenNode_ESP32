@@ -144,9 +144,6 @@ menuconfig USE_CANOPENNODE
         config CO_SDO_CLI_SEGMENTED
             bool "SDO Client Segmented"
             default n
-        config CO_TIME_PRODUCER
-            bool "TIME Producer"
-            default n
         config CO_CONFIG_EM_CONSUMER
             bool "EM Consumer"
             default n
@@ -174,9 +171,6 @@ menuconfig USE_CANOPENNODE
             endif #CO_LED_ENABLE
         config CO_TIME_PRODUCER
             bool "TIME Producer"
-            default n
-        config CO_CONFIG_EM_CONSUMER
-            bool "EM Consumer"
             default n
         config CO_STORAGE
             bool "Storage on NVS"

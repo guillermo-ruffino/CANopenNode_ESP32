@@ -221,6 +221,8 @@ extern "C"
 
 #if CONFIG_CO_STORAGE
 #define CO_CONFIG_STORAGE (CO_CONFIG_STORAGE_ENABLE)
+#else
+#define CO_CONFIG_STORAGE 0
 #endif
 
 #ifdef __cplusplus

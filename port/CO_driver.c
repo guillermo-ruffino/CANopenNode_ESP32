@@ -529,11 +529,16 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
             }
         }
 
-        if (overflow != 0)
+        static uint8_t overflow_last = 0;
+        if (overflow != overflow_last)
         {
             /* CAN RX bus overflow */
-            ESP_LOGI(TAG, "Set overflow error");
-            status |= CO_CAN_ERRRX_OVERFLOW;
+            if (overflow != 0)
+            {
+                ESP_LOGE(TAG, "Set overflow error %d", overflow);
+                status |= CO_CAN_ERRRX_OVERFLOW;
+            }
+            overflow_last = overflow;
         }
 
         CANmodule->CANerrorStatus = status;

@@ -179,7 +179,7 @@ extern "C"
 #ifdef CONFIG_CO_TIME_PRODUCER
 #define CO_CONFIG_TIME (CO_CONFIG_TIME_BASE | CO_CONFIG_TIME_PRODUCER)
 #else
-#define CO_CONFIG_TIME CO_CONFIG_TIME_BASE
+#define CO_CONFIG_TIME (CO_CONFIG_TIME_BASE | CO_CONFIG_FLAG_CALLBACK_PRE)
 #endif
 
 /* Stack configuration override default values.

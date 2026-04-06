@@ -6,6 +6,7 @@
 #include "CANopenNode_ESP32.h"
 #include "OD.h"
 #include "OD_extensions.h"
+#include <time.h>
 
 #if (CONFIG_FREERTOS_HZ != 1000)
 #error "FreeRTOS tick interrupt frequency must be 1000Hz"
@@ -30,6 +31,17 @@ static void CO_periodicTask(void *pxParam);
 
 static SemaphoreHandle_t xPeriodicTaskSemaphore, xProcessTaskSemaphore;
 static uint8_t active_node_id = CONFIG_CO_DEFAULT_NODE_ID;
+
+/* Days between CANopen epoch (1984-01-01) and Unix epoch (1970-01-01) */
+#define CO_TIME_EPOCH_OFFSET_DAYS 5113U
+
+static volatile bool co_time_received = false;
+
+static void on_co_time_received(void *arg)
+{
+    (void)arg;
+    co_time_received = true;
+}
 
 #if (CO_CONFIG_STORAGE) & CO_CONFIG_STORAGE_ENABLE
 static CO_storage_t storage;
@@ -139,6 +151,9 @@ static void CO_mainTask(void *pxParam)
                 ESP_LOGE(TAG, "CANopen initialization failed: %d", err);
         }
         CO_SYNC_initCallbackPre(CO->SYNC, NULL, SignalPeriodicTask);
+#if ((CO_CONFIG_TIME) & CO_CONFIG_FLAG_CALLBACK_PRE) != 0
+        CO_TIME_initCallbackPre(CO->TIME, NULL, on_co_time_received);
+#endif
 
         err = CO_CANopenInitPDO(CO, CO->em, OD, active_node_id, &errInfo);
         if (err != CO_ERROR_NO)
@@ -187,6 +202,15 @@ static void CO_mainTask(void *pxParam)
             vTaskDelayUntil(&xLastWakeTime, CONFIG_CO_MAIN_TASK_INTERVAL_MS);
 #endif
             reset = CO_process(CO, false, CO_MAIN_TASK_INTERVAL_US, NULL);
+            if (co_time_received)
+            {
+                co_time_received = false;
+                time_t unix_time = ((time_t)CO->TIME->days + CO_TIME_EPOCH_OFFSET_DAYS) * 86400 + CO->TIME->ms / 1000U;
+                struct timespec ts = {.tv_sec = unix_time, .tv_nsec = (long)(CO->TIME->ms % 1000U) * 1000000L};
+                clock_settime(CLOCK_REALTIME, &ts);
+                //  ESP_LOGI(TAG, "System time set from CANopen TIME: days=%u ms=%lu",
+                //           CO->TIME->days, (unsigned long)CO->TIME->ms);
+            }
 #if CO_CONFIG_LEDS
             uint32_t ledState;
 #if (CONFIG_CO_LED_RED_GPIO >= 0)

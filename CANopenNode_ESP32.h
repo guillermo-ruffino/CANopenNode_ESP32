@@ -14,6 +14,9 @@ void CO_ESP32_alloc(uint8_t node_id);
 void CO_ESP32_storage_init(CO_storage_entry_t *entries, uint8_t entry_count);
 void CO_ESP32_start_task(void);
 
+/* Called after CO_CANopenInit — override in application to register callbacks (e.g. CO_EM_initCallbackRx) */
+void CO_ESP32_post_canopen_init(void);
+
 /* Heartbeat consumer utilities */
 void CO_consumer_heartbeat_init(uint8_t node_id, uint16_t timeout_ms);
 CO_HBconsNode_t *CO_consumer_find(uint8_t node_id);

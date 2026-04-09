@@ -79,6 +79,8 @@ void CO_ESP32_storage_init(CO_storage_entry_t *entries, uint8_t entry_count)
 #endif
 }
 
+__attribute__((weak)) void CO_ESP32_post_canopen_init(void) {}
+
 void CO_ESP32_start_task(void)
 {
     xCoMainTaskHandle = xTaskCreateStaticPinnedToCore(
@@ -150,6 +152,7 @@ static void CO_mainTask(void *pxParam)
             else
                 ESP_LOGE(TAG, "CANopen initialization failed: %d", err);
         }
+        CO_ESP32_post_canopen_init();
         CO_SYNC_initCallbackPre(CO->SYNC, NULL, SignalPeriodicTask);
 #if ((CO_CONFIG_TIME) & CO_CONFIG_FLAG_CALLBACK_PRE) != 0
         CO_TIME_initCallbackPre(CO->TIME, NULL, on_co_time_received);

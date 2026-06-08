@@ -170,6 +170,11 @@ static void CO_mainTask(void *pxParam)
         }
         if (rpdo_setup_cb != NULL)
             rpdo_setup_cb(CO, SignalPeriodicTask);
+        else
+        {
+            // Legacy init callback pre on RPDO 0
+            CO_RPDO_initCallbackPre(&CO->RPDO[0], NULL, SignalPeriodicTask);
+        }
 
 #if (CO_CONFIG_SDO_SRV) & CO_CONFIG_FLAG_CALLBACK_PRE
         CO_SDOserver_initCallbackPre(CO->SDOserver, NULL, SignalProcessTask);

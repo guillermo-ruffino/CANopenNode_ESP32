@@ -31,6 +31,7 @@ static void CO_periodicTask(void *pxParam);
 
 static SemaphoreHandle_t xPeriodicTaskSemaphore, xProcessTaskSemaphore;
 static uint8_t active_node_id = CONFIG_CO_DEFAULT_NODE_ID;
+static CO_rpdo_setup_cb_t rpdo_setup_cb = NULL;
 
 /* Days between CANopen epoch (1984-01-01) and Unix epoch (1970-01-01) */
 #define CO_TIME_EPOCH_OFFSET_DAYS 5113U
@@ -81,8 +82,9 @@ void CO_ESP32_storage_init(CO_storage_entry_t *entries, uint8_t entry_count)
 
 __attribute__((weak)) void CO_ESP32_post_canopen_init(void) {}
 
-void CO_ESP32_start_task(void)
+void CO_ESP32_start_task(CO_rpdo_setup_cb_t cb)
 {
+    rpdo_setup_cb = cb;
     xCoMainTaskHandle = xTaskCreateStaticPinnedToCore(
         CO_mainTask, "CO_main",
         CONFIG_CO_MAIN_TASK_STACK_SIZE, (void *)0,
@@ -94,7 +96,7 @@ bool CO_ESP32_run(uint8_t node_id, CO_storage_entry_t *entries, uint8_t entry_co
 {
     CO_ESP32_alloc(node_id);
     CO_ESP32_storage_init(entries, entry_count);
-    CO_ESP32_start_task();
+    CO_ESP32_start_task(NULL);
     return true;
 }
 
@@ -166,7 +168,8 @@ static void CO_mainTask(void *pxParam)
             else
                 ESP_LOGE(TAG, "PDO initialization failed: %d", err);
         }
-        CO_RPDO_initCallbackPre(&CO->RPDO[0], NULL, SignalPeriodicTask);
+        if (rpdo_setup_cb != NULL)
+            rpdo_setup_cb(CO, SignalPeriodicTask);
 
 #if (CO_CONFIG_SDO_SRV) & CO_CONFIG_FLAG_CALLBACK_PRE
         CO_SDOserver_initCallbackPre(CO->SDOserver, NULL, SignalProcessTask);

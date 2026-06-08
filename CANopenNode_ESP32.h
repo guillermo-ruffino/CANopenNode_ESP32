@@ -9,10 +9,14 @@ extern CO_t *CO;
 /* All-in-one init (allocate + storage + start task) */
 bool CO_ESP32_run(uint8_t node_id, CO_storage_entry_t *entries, uint8_t entry_count);
 
+/* Callback invoked during task init to register RPDO callbackPre hooks.
+ * signal_fn is the component's internal semaphore-signal function. */
+typedef void (*CO_rpdo_setup_cb_t)(CO_t *CO, void (*signal_fn)(void *));
+
 /* Split init steps (for projects that need to read OD values between storage and task start) */
 void CO_ESP32_alloc(uint8_t node_id);
 void CO_ESP32_storage_init(CO_storage_entry_t *entries, uint8_t entry_count);
-void CO_ESP32_start_task(void);
+void CO_ESP32_start_task(CO_rpdo_setup_cb_t rpdo_setup_cb);
 
 /* Called after CO_CANopenInit — override in application to register callbacks (e.g. CO_EM_initCallbackRx) */
 void CO_ESP32_post_canopen_init(void);

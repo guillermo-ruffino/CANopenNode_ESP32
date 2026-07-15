@@ -3,6 +3,7 @@
 #if CONFIG_USE_CANOPENNODE
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "CANopenNode_ESP32.h"
 #include "OD.h"
 #include "OD_extensions.h"
@@ -12,7 +13,6 @@
 #error "FreeRTOS tick interrupt frequency must be 1000Hz"
 #endif
 #define CO_PERIODIC_TASK_INTERVAL_US (CONFIG_CO_PERIODIC_TASK_INTERVAL_MS * 1000)
-#define CO_MAIN_TASK_INTERVAL_US (CONFIG_CO_MAIN_TASK_INTERVAL_MS * 1000)
 
 static const char *TAG = "CO_ESP32";
 
@@ -205,6 +205,7 @@ static void CO_mainTask(void *pxParam)
         ESP_LOGI(TAG, "CANopenNode is running");
 
         xLastWakeTime = xTaskGetTickCount();
+        int64_t lastProcessTime_us = esp_timer_get_time();
         while (reset == CO_RESET_NOT)
         {
 #if (CO_CONFIG_SDO_SRV) & CO_CONFIG_FLAG_CALLBACK_PRE
@@ -212,7 +213,10 @@ static void CO_mainTask(void *pxParam)
 #else
             vTaskDelayUntil(&xLastWakeTime, CONFIG_CO_MAIN_TASK_INTERVAL_MS);
 #endif
-            reset = CO_process(CO, false, CO_MAIN_TASK_INTERVAL_US, NULL);
+            int64_t now_us = esp_timer_get_time();
+            uint32_t timeDifference_us = (uint32_t)(now_us - lastProcessTime_us);
+            lastProcessTime_us = now_us;
+            reset = CO_process(CO, false, timeDifference_us, NULL);
             if (co_time_received)
             {
                 co_time_received = false;

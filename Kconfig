@@ -175,6 +175,9 @@ menuconfig USE_CANOPENNODE
         config CO_STORAGE
             bool "Storage on NVS"
             default n
+        config CO_OTA_ENABLE
+            bool "CAN OTA (firmware download via OD 0x1F50)"
+            default n
         menu "Debug"
             config CO_DEBUG_SDO
                 bool "SDO client/server"

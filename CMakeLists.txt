@@ -50,6 +50,15 @@ list(APPEND srcs
   "${co_port_dir}/CO_nvs.c")
 endif()
 
+if(CONFIG_CO_OTA_ENABLE)
+list(APPEND srcs
+  "extra/can_ota/can_ota.c")
+list(APPEND include_dirs
+  "extra/can_ota")
+list(APPEND private_requirements
+  app_update esp_timer)
+endif() #CONFIG_CO_OTA_ENABLE
+
 idf_component_register(SRCS ${srcs}
                     INCLUDE_DIRS ${include_dirs}
                     PRIV_INCLUDE_DIRS ${private_include_dirs}

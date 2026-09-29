@@ -157,7 +157,29 @@ static esp_err_t CO_twaiTransmit(const CO_CANtx_t *buffer, uint32_t slotTimeoutM
     slot->frame.buffer_len = rtr ? 0 : dlc;
     memcpy(slot->data, buffer->data, dlc);
 
-    esp_err_t espRet = twai_node_transmit(twaiNode, &slot->frame, 0);
+    /* IDF v5.5 twai_node_transmit() race: when the controller is busy it queues the
+     * frame, then re-checks hw_busy and, if the ISR went idle meanwhile, pulls from the
+     * queue expecting the frame to still be there. If the caller is preempted in between
+     * long enough for the ISR to send that frame and go idle, the queue is empty and it
+     * hits assert(false && "should always get frame at this moment"). Low priority callers
+     * (e.g. CO_NMT_sendCommand from app_main) get preempted there. Suspending the scheduler
+     * closes the window; the TWAI ISR shares CONFIG_CO_TASK_CORE, so only ISRs can land
+     * in it, and two TX interrupts can't both fit in a few microseconds.
+     * With the scheduler suspended the driver must not reach ESP_LOGx (its log lock would
+     * assert). Its only task-context ESP_LOGx is "tx queue full", so check that first;
+     * nothing but this function adds frames to that queue. */
+    esp_err_t espRet;
+    twai_node_status_t status;
+    vTaskSuspendAll();
+    if ((twai_node_get_info(twaiNode, &status, NULL) != ESP_OK) || (status.tx_queue_remaining == 0))
+    {
+        espRet = ESP_ERR_TIMEOUT;
+    }
+    else
+    {
+        espRet = twai_node_transmit(twaiNode, &slot->frame, 0);
+    }
+    xTaskResumeAll();
     if (espRet != ESP_OK)
     {
         xQueueSend(txFreeQueue, &slot, 0);

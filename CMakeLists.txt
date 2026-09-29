@@ -64,4 +64,4 @@ idf_component_register(SRCS ${srcs}
                     PRIV_INCLUDE_DIRS ${private_include_dirs}
                     LDFRAGMENTS ${ldfragments}
                     PRIV_REQUIRES ${private_requirements}
-                    REQUIRES freertos driver main)
+                    REQUIRES freertos driver esp_driver_twai main)

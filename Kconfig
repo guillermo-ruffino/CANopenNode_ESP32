@@ -75,6 +75,21 @@ menuconfig USE_CANOPENNODE
                 default 800 if CO_DEFAULT_BPS_800K
                 default 1000 if CO_DEFAULT_BPS_1M
                 default 250
+            config CO_TWAI_RX_QUEUE_LEN
+                int "RX queue length (frames)"
+                range 8 512
+                default 96
+                help
+                    Frames buffered between the TWAI RX interrupt and the CANopen Rx task.
+                    Frames arriving while the queue is full are dropped and reported as
+                    CO_CAN_ERRRX_OVERFLOW.
+            config CO_TWAI_TX_QUEUE_LEN
+                int "TX queue length (frames)"
+                range 2 128
+                default 24
+                help
+                    Depth of the TWAI driver transmit queue. One more frame can be in flight
+                    in the controller itself.
         endmenu #"TWAI Configuration"
         menu "Task Configuration"
             choice

@@ -25,44 +25,46 @@
  * limitations under the License.
  */
 
+#include <string.h>
 #include "301/CO_driver.h"
 #include "esp_log.h"
-#include "driver/twai.h"
+#include "esp_system.h"
+#include "esp_twai.h"
+#include "esp_twai_onchip.h"
+#include "freertos/queue.h"
 
 static const char *TAG = "CO_driver";
 
+#define CO_RX_QUEUE_LEN CONFIG_CO_TWAI_RX_QUEUE_LEN
+#define CO_TX_QUEUE_LEN CONFIG_CO_TWAI_TX_QUEUE_LEN
+/* The driver queues pointers to frames, so each frame must stay valid until its
+ * on_tx_done callback. One frame can be in the controller while CO_TX_QUEUE_LEN
+ * more wait in the driver queue. */
+#define CO_TX_POOL_LEN (CO_TX_QUEUE_LEN + 1)
+/* How long the Tx task waits for a free TX slot before giving up on a frame */
+#define CO_TX_TASK_SLOT_TIMEOUT_MS 1000
+
 typedef struct
 {
-    uint16_t kbps;
-    twai_timing_config_t timing_config;
-} baudrate_config_t;
+    twai_frame_t frame;
+    uint8_t data[TWAI_FRAME_MAX_LEN];
+} tx_slot_t;
 
-static baudrate_config_t const baudrate_config[] = {
-#if CONFIG_CO_BPS_25K
-    {25, TWAI_TIMING_CONFIG_25KBITS()},
-#endif
-#if CONFIG_CO_BPS_50K
-    {50, TWAI_TIMING_CONFIG_50KBITS()},
-#endif
-#if CONFIG_CO_BPS_100K
-    {100, TWAI_TIMING_CONFIG_100KBITS()},
-#endif
-#if CONFIG_CO_BPS_125K
-    {125, TWAI_TIMING_CONFIG_125KBITS()},
-#endif
-#if CONFIG_CO_BPS_250K
-    {250, TWAI_TIMING_CONFIG_250KBITS()},
-#endif
-#if CONFIG_CO_BPS_500K
-    {500, TWAI_TIMING_CONFIG_500KBITS()},
-#endif
-#if CONFIG_CO_BPS_1M
-    {1000, TWAI_TIMING_CONFIG_1MBITS()},
-#endif
-#if CONFIG_CO_BPS_25K
-    {25, TWAI_TIMING_CONFIG_25KBITS()},
-#endif
-};
+static twai_node_handle_t twaiNode = NULL;
+
+static tx_slot_t txPool[CO_TX_POOL_LEN];
+static StaticQueue_t txFreeQueueBuf;
+static uint8_t txFreeQueueStorage[CO_TX_POOL_LEN * sizeof(tx_slot_t *)];
+static QueueHandle_t txFreeQueue = NULL;
+
+static StaticQueue_t rxQueueBuf;
+static uint8_t rxQueueStorage[CO_RX_QUEUE_LEN * sizeof(CO_CANrxMsg_t)];
+static QueueHandle_t rxQueue = NULL;
+
+/* Counters written from the TWAI ISR */
+static volatile uint32_t rxQueueOverflowCount = 0;
+static volatile uint32_t txFailedCount = 0;
+static volatile uint32_t busOffCount = 0;
 
 static StaticTask_t xCoTxTaskBuffer;
 static StackType_t xCoTxStack[CONFIG_CO_TX_TASK_STACK_SIZE];
@@ -75,6 +77,93 @@ static TaskHandle_t xCoRxTaskHandle = NULL;
 static void CO_rxTask(void *pxParam);
 
 static bool bInstalled = false;
+
+/******************************************************************************/
+static bool CO_twaiOnRxDone(twai_node_handle_t handle, const twai_rx_done_event_data_t *edata, void *user_ctx)
+{
+    CO_CANrxMsg_t msg;
+    twai_frame_t frame = {
+        .buffer = msg.data,
+        .buffer_len = sizeof(msg.data),
+    };
+    BaseType_t woken = pdFALSE;
+
+    if (twai_node_receive_from_isr(handle, &frame) != ESP_OK)
+    {
+        return false;
+    }
+    if (frame.header.ide || frame.header.fdf)
+    {
+        /* CANopen uses 11-bit classic frames only */
+        return false;
+    }
+    msg.ident = (uint16_t)(frame.header.id & TWAI_STD_ID_MASK);
+    msg.rtr = frame.header.rtr;
+    msg.DLC = (uint8_t)(frame.header.dlc > TWAI_FRAME_MAX_DLC ? TWAI_FRAME_MAX_DLC : frame.header.dlc);
+
+    if (xQueueSendFromISR(rxQueue, &msg, &woken) != pdTRUE)
+    {
+        rxQueueOverflowCount++;
+    }
+    return woken == pdTRUE;
+}
+
+static bool CO_twaiOnTxDone(twai_node_handle_t handle, const twai_tx_done_event_data_t *edata, void *user_ctx)
+{
+    BaseType_t woken = pdFALSE;
+
+    if (!edata->is_tx_success)
+    {
+        txFailedCount++;
+    }
+    if (edata->done_tx_frame != NULL)
+    {
+        /* frame is the first member of tx_slot_t */
+        tx_slot_t *slot = (tx_slot_t *)edata->done_tx_frame;
+        xQueueSendFromISR(txFreeQueue, &slot, &woken);
+    }
+    return woken == pdTRUE;
+}
+
+static bool CO_twaiOnStateChange(twai_node_handle_t handle, const twai_state_change_event_data_t *edata, void *user_ctx)
+{
+    if (edata->new_sta == TWAI_ERROR_BUS_OFF && edata->old_sta != TWAI_ERROR_BUS_OFF)
+    {
+        busOffCount++;
+    }
+    return false;
+}
+
+/* Queue one CANopen tx buffer on the TWAI node. slotTimeoutMs is how long to wait
+ * for a free TX slot; the driver queue itself never blocks since the pool is sized
+ * to fit in it. */
+static esp_err_t CO_twaiTransmit(const CO_CANtx_t *buffer, uint32_t slotTimeoutMs)
+{
+    tx_slot_t *slot;
+
+    if (xQueueReceive(txFreeQueue, &slot, pdMS_TO_TICKS(slotTimeoutMs)) != pdTRUE)
+    {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    bool rtr = (buffer->ident & 0x0800U) != 0U;
+    uint8_t dlc = buffer->DLC > TWAI_FRAME_MAX_LEN ? TWAI_FRAME_MAX_LEN : buffer->DLC;
+
+    memset(&slot->frame, 0, sizeof(slot->frame));
+    slot->frame.header.id = buffer->ident & TWAI_STD_ID_MASK;
+    slot->frame.header.rtr = rtr;
+    slot->frame.header.dlc = dlc;
+    slot->frame.buffer = slot->data;
+    slot->frame.buffer_len = rtr ? 0 : dlc;
+    memcpy(slot->data, buffer->data, dlc);
+
+    esp_err_t espRet = twai_node_transmit(twaiNode, &slot->frame, 0);
+    if (espRet != ESP_OK)
+    {
+        xQueueSend(txFreeQueue, &slot, 0);
+    }
+    return espRet;
+}
 
 /******************************************************************************/
 void CO_CANsetConfigurationMode(void *CANptr)
@@ -169,37 +258,57 @@ CO_ReturnError_t CO_CANmodule_init(
         txArray[i].bufferFull = false;
     }
 
-    /* Configure CAN module registers */
-    twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(CONFIG_CO_TWAI_TX_GPIO, CONFIG_CO_TWAI_RX_GPIO, TWAI_MODE_NORMAL);
-    twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
-    twai_timing_config_t t_config;
-    for (i = 0; i < (sizeof(baudrate_config) / sizeof(baudrate_config[0])); i++)
-    {
-        if (CANbitRate == baudrate_config[i].kbps)
-        {
-            t_config = baudrate_config[i].timing_config;
-            break;
-        }
-    }
-    if (i >= (sizeof(baudrate_config) / sizeof(baudrate_config[0])))
-    {
-        /* Baudrate not found */
-        return CO_ERROR_ILLEGAL_BAUDRATE;
-    }
-
     /* Install TWAI driver */
     if (bInstalled != true)
     {
+        twai_onchip_node_config_t node_config = {
+            .io_cfg = {
+                .tx = CONFIG_CO_TWAI_TX_GPIO,
+                .rx = CONFIG_CO_TWAI_RX_GPIO,
+                .quanta_clk_out = GPIO_NUM_NC,
+                .bus_off_indicator = GPIO_NUM_NC,
+            },
+            /* sample point left at the driver default (80% at 500k, 87.5% below) */
+            .bit_timing = {
+                .bitrate = (uint32_t)CANbitRate * 1000U,
+            },
+            .fail_retry_cnt = -1, /* retransmit until success, as the legacy driver did */
+            .tx_queue_depth = CO_TX_QUEUE_LEN,
+        };
+        const twai_event_callbacks_t cbs = {
+            .on_rx_done = CO_twaiOnRxDone,
+            .on_tx_done = CO_twaiOnTxDone,
+            .on_state_change = CO_twaiOnStateChange,
+        };
+
+        esp_err_t espRet = twai_new_node_onchip(&node_config, &twaiNode);
+        if (espRet != ESP_OK)
+        {
+            ESP_LOGE(TAG, "twai_new_node_onchip(%u kbps) failed: %s", CANbitRate, esp_err_to_name(espRet));
+            twaiNode = NULL;
+            return (espRet == ESP_ERR_INVALID_ARG) ? CO_ERROR_ILLEGAL_BAUDRATE : CO_ERROR_OUT_OF_MEMORY;
+        }
+
+        rxQueue = xQueueCreateStatic(CO_RX_QUEUE_LEN, sizeof(CO_CANrxMsg_t), rxQueueStorage, &rxQueueBuf);
+        txFreeQueue = xQueueCreateStatic(CO_TX_POOL_LEN, sizeof(tx_slot_t *), txFreeQueueStorage, &txFreeQueueBuf);
+        for (i = 0; i < CO_TX_POOL_LEN; i++)
+        {
+            tx_slot_t *slot = &txPool[i];
+            xQueueSend(txFreeQueue, &slot, 0);
+        }
+        rxQueueOverflowCount = 0;
+        txFailedCount = 0;
+        busOffCount = 0;
+
         /* create Mutex */
         CANmodule->xMutexCanSendHdl = xSemaphoreCreateRecursiveMutexStatic(&(CANmodule->xMutexCanSendBuf));
         CANmodule->xMutexEmcyHdl = xSemaphoreCreateRecursiveMutexStatic(&(CANmodule->xMutexEmcyBuf));
         CANmodule->xMutexODHdl = xSemaphoreCreateRecursiveMutexStatic(&(CANmodule->xMutexODBuf));
 
-        /* Install TWAI */
-        ESP_ERROR_CHECK(twai_driver_install(&g_config, &t_config, &f_config));
-        ESP_LOGI(TAG, "Driver installed");
-        ESP_ERROR_CHECK(twai_start());
-        ESP_LOGI(TAG, "Driver started");
+        /* Start TWAI */
+        ESP_ERROR_CHECK(twai_node_register_event_callbacks(twaiNode, &cbs, CANmodule));
+        ESP_ERROR_CHECK(twai_node_enable(twaiNode));
+        ESP_LOGI(TAG, "Driver started, %u kbps, rx queue %d, tx queue %d", CANbitRate, CO_RX_QUEUE_LEN, CO_TX_QUEUE_LEN);
 
         bInstalled = true;
 
@@ -270,11 +379,17 @@ void CO_CANmodule_disable(CO_CANmodule_t *CANmodule)
         CANmodule->xMutexODHdl = NULL;
         ESP_LOGI(TAG, "mutex deleted");
 
-        /* Uninstall TWAI */
-        ESP_ERROR_CHECK(twai_stop());
+        /* Uninstall TWAI. Disabling the node stops its ISR, so the queues can go after it. */
+        ESP_ERROR_CHECK(twai_node_disable(twaiNode));
         ESP_LOGI(TAG, "Driver stopped");
-        ESP_ERROR_CHECK(twai_driver_uninstall());
+        ESP_ERROR_CHECK(twai_node_delete(twaiNode));
+        twaiNode = NULL;
         ESP_LOGI(TAG, "Driver uninstalled");
+
+        vQueueDelete(rxQueue);
+        rxQueue = NULL;
+        vQueueDelete(txFreeQueue);
+        txFreeQueue = NULL;
 
         bInstalled = false;
     }
@@ -394,13 +509,9 @@ CO_ReturnError_t CO_CANsend(CO_CANmodule_t *CANmodule, CO_CANtx_t *buffer)
 
     CO_LOCK_CAN_SEND(CANmodule);
 
-    twai_message_t tx_msg;
-    memset(&tx_msg, 0, sizeof(tx_msg));
-    tx_msg.identifier = buffer->ident;
-    tx_msg.data_length_code = buffer->DLC;
-    memcpy(tx_msg.data, buffer->data, buffer->DLC);
-
-    esp_err_t espRet = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));
+    /* Don't block the caller: if every TX slot is in flight, leave the frame
+     * to the Tx task, which waits for a slot. */
+    esp_err_t espRet = CO_twaiTransmit(buffer, 0);
     if (ESP_OK != espRet)
     {
         ESP_LOGE(TAG, "Failed Tx. ident:%#2lx err:0x%x", buffer->ident, espRet);
@@ -462,27 +573,77 @@ void CO_CANclearPendingSyncPDOs(CO_CANmodule_t *CANmodule)
     }
 }
 
+/******************************************************************************/
+void CO_CANgetStats(CO_CANstats_t *stats)
+{
+    memset(stats, 0, sizeof(*stats));
+    if (!bInstalled || twaiNode == NULL)
+    {
+        return;
+    }
+
+    twai_node_status_t status;
+    twai_node_record_t record;
+    if (twai_node_get_info(twaiNode, &status, &record) == ESP_OK)
+    {
+        stats->state = status.state;
+        stats->tx_error_count = status.tx_error_count;
+        stats->rx_error_count = status.rx_error_count;
+        stats->tx_queue_remaining = status.tx_queue_remaining;
+        stats->bus_err_num = record.bus_err_num;
+    }
+    stats->installed = true;
+    stats->rx_queue_waiting = uxQueueMessagesWaiting(rxQueue);
+    stats->rx_queue_overflow = rxQueueOverflowCount;
+    stats->tx_failed = txFailedCount;
+    stats->bus_off_count = busOffCount;
+}
+
 void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
 {
     uint32_t err;
-    twai_status_info_t statusInfo;
+    twai_node_status_t statusInfo;
     esp_err_t espRet = ESP_OK;
 
-    espRet = twai_get_status_info(&statusInfo);
+    if (!bInstalled || twaiNode == NULL)
+    {
+        return;
+    }
+
+    espRet = twai_node_get_info(twaiNode, &statusInfo, NULL);
     if (espRet != ESP_OK)
     {
-        ESP_LOGW(TAG, "twai_get_status_info returns %d", espRet);
+        ESP_LOGW(TAG, "twai_node_get_info returns %d", espRet);
         return;
+    }
+
+    /* The new driver does not recover from bus-off on its own. Start recovery once per
+     * bus-off entry; the node reports BUS_OFF until 128 x 11 recessive bits are seen. */
+    static bool recovering = false;
+    if (statusInfo.state == TWAI_ERROR_BUS_OFF)
+    {
+        if (!recovering)
+        {
+            ESP_LOGE(TAG, "Bus-off (tx_err %u), starting recovery", statusInfo.tx_error_count);
+            recovering = (twai_node_recover(twaiNode) == ESP_OK);
+        }
+    }
+    else if (recovering)
+    {
+        ESP_LOGW(TAG, "Recovered from bus-off");
+        recovering = false;
     }
 
     /******************************************************************************/
     /* Get error counters from the module. If necessary, function may use
      * different way to determine errors. */
-    uint8_t rxErrors = statusInfo.rx_error_counter;
-    uint8_t txErrors = statusInfo.tx_error_counter;
-    uint8_t overflow = statusInfo.rx_overrun_count;
+    uint16_t rxErrors = statusInfo.rx_error_count;
+    uint16_t txErrors = statusInfo.tx_error_count;
+    bool busOff = statusInfo.state == TWAI_ERROR_BUS_OFF;
+    /* Software RX queue drops; the new driver doesn't expose hardware FIFO overruns */
+    uint8_t overflow = (uint8_t)rxQueueOverflowCount;
 
-    err = ((uint32_t)txErrors << 16) | ((uint32_t)rxErrors << 8) | overflow;
+    err = ((uint32_t)busOff << 24) | ((uint32_t)(txErrors & 0xFFU) << 16) | ((uint32_t)(rxErrors & 0xFFU) << 8) | overflow;
 
     if (CANmodule->errOld != err)
     {
@@ -490,7 +651,7 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
 
         CANmodule->errOld = err;
 
-        if (txErrors >= 256U)
+        if (busOff)
         {
             /* bus off */
             status |= CO_CAN_ERRTX_BUS_OFF;
@@ -517,7 +678,7 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
             {
                 status |= CO_CAN_ERRTX_WARNING | CO_CAN_ERRTX_PASSIVE;
             }
-            else if (rxErrors >= 96)
+            else if (txErrors >= 96)
             {
                 status |= CO_CAN_ERRTX_WARNING;
             }
@@ -549,7 +710,6 @@ void CO_CANmodule_process(CO_CANmodule_t *CANmodule)
 static void CO_txTask(void *pxParam)
 {
     uint32_t notificationValue;
-    twai_message_t tx_msg;
     CO_CANtx_t *pCanTx;
     esp_err_t espRet;
     CO_CANmodule_t *CANmodule = (CO_CANmodule_t *)pxParam;
@@ -574,12 +734,7 @@ static void CO_txTask(void *pxParam)
                 pCanTx = &(CANmodule->txArray[i]);
                 if (pCanTx->bufferFull)
                 {
-                    memset(&tx_msg, 0, sizeof(tx_msg));
-                    tx_msg.identifier = pCanTx->ident;
-                    tx_msg.data_length_code = pCanTx->DLC;
-                    memcpy(tx_msg.data, pCanTx->data, TWAI_FRAME_MAX_DLC);
-
-                    espRet = twai_transmit(&tx_msg, pdMS_TO_TICKS(1000));
+                    espRet = CO_twaiTransmit(pCanTx, CO_TX_TASK_SLOT_TIMEOUT_MS);
                     if (ESP_OK == espRet)
                     {
                         pCanTx->bufferFull = false;
@@ -590,6 +745,7 @@ static void CO_txTask(void *pxParam)
                         ESP_LOGE(TAG, "Failed Tx. id:%d err:0x%x", i, espRet);
                         if (espRet == ESP_ERR_INVALID_STATE)
                         {
+                            /* node is bus-off, CO_CANmodule_process() starts the recovery */
                             err_invalid_state_count++;
 
                             ESP_LOGE(TAG, "Err Invalid state count is %d, will restart at 10", err_invalid_state_count);
@@ -609,24 +765,27 @@ static void CO_txTask(void *pxParam)
 
 static void CO_rxTask(void *pxParam)
 {
-    twai_message_t rx_msg;
+    CO_CANrxMsg_t rx_msg;
     CO_CANmodule_t *CANmodule = (CO_CANmodule_t *)pxParam;
     ESP_LOGI(TAG, "rx task running");
 
     while (1)
     {
-        twai_message_t *rcvMsg;    /* pointer to received message in CAN module */
         uint16_t index;            /* index of received message */
         uint32_t rcvMsgIdent;      /* identifier of the received message */
         CO_CANrx_t *buffer = NULL; /* receive message buffer from CO_CANmodule_t object. */
         bool_t msgMatched = false;
 
-        twai_receive(&rx_msg, portMAX_DELAY);
+        if (xQueueReceive(rxQueue, &rx_msg, portMAX_DELAY) != pdTRUE)
+        {
+            continue;
+        }
 
 #if CONFIG_CO_DEBUG_DRIVER_CAN_RECEIVE
-        ESP_LOGI(TAG, "CANRX id: 0x%lx, dlc: %d, data: [%d %d %d %d %d %d %d %d]",
-                 rx_msg.identifier,
-                 rx_msg.data_length_code,
+        ESP_LOGI(TAG, "CANRX id: 0x%x%s, dlc: %d, data: [%d %d %d %d %d %d %d %d]",
+                 rx_msg.ident,
+                 rx_msg.rtr ? " RTR" : "",
+                 rx_msg.DLC,
                  rx_msg.data[0],
                  rx_msg.data[1],
                  rx_msg.data[2],
@@ -637,8 +796,8 @@ static void CO_rxTask(void *pxParam)
                  rx_msg.data[7]);
 #endif /* CONFIG_CO_DEBUG_DRIVER_CAN_RECEIVE */
 
-        rcvMsg = &rx_msg;
-        rcvMsgIdent = rx_msg.identifier;
+        /* bit 11 carries RTR, aligned with CO_CANrx_t ident/mask */
+        rcvMsgIdent = rx_msg.ident | (rx_msg.rtr ? 0x0800U : 0U);
         /* CAN module filters are not used, message with any standard 11-bit identifier */
         /* has been received. Search rxArray form CANmodule for the same CAN-ID. */
         buffer = &CANmodule->rxArray[0];
@@ -655,7 +814,7 @@ static void CO_rxTask(void *pxParam)
         /* Call specific function, which will process the message */
         if (msgMatched && (buffer != NULL) && (buffer->CANrx_callback != NULL))
         {
-            buffer->CANrx_callback(buffer->object, (void *)rcvMsg);
+            buffer->CANrx_callback(buffer->object, (void *)&rx_msg);
         }
     }
 }

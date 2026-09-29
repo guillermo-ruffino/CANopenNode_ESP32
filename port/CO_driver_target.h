@@ -35,7 +35,8 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "driver/twai.h"
+#include "esp_twai.h"
+#include "driver/gpio.h"
 
 #ifdef CO_DRIVER_CUSTOM
 #include "CO_driver_custom.h"
@@ -61,10 +62,37 @@ extern "C"
     typedef float float32_t;
     typedef double float64_t;
 
+    /* Received CAN message, copied out of the TWAI RX interrupt into the Rx task queue */
+    typedef struct
+    {
+        uint16_t ident; /* 11-bit standard identifier */
+        uint8_t rtr;
+        uint8_t DLC;
+        uint8_t data[8];
+    } CO_CANrxMsg_t;
+
 /* Access to received CAN message */
-#define CO_CANrxMsg_readIdent(msg) ((uint16_t)(((twai_message_t *)msg)->identifier))
-#define CO_CANrxMsg_readDLC(msg) ((uint8_t)(((twai_message_t *)msg)->data_length_code))
-#define CO_CANrxMsg_readData(msg) ((uint8_t *)&(((twai_message_t *)msg)->data[0]))
+#define CO_CANrxMsg_readIdent(msg) ((uint16_t)(((CO_CANrxMsg_t *)msg)->ident))
+#define CO_CANrxMsg_readDLC(msg) ((uint8_t)(((CO_CANrxMsg_t *)msg)->DLC))
+#define CO_CANrxMsg_readData(msg) ((uint8_t *)&(((CO_CANrxMsg_t *)msg)->data[0]))
+
+    /* TWAI controller / driver status snapshot, see CO_CANgetStats() */
+    typedef struct
+    {
+        bool installed;               /* false: node not created, remaining fields are zero */
+        twai_error_state_t state;     /* ACTIVE / WARNING / PASSIVE / BUS_OFF */
+        uint16_t tx_error_count;      /* TEC */
+        uint16_t rx_error_count;      /* REC */
+        uint32_t bus_err_num;         /* bus errors since enable / last recovery */
+        uint32_t tx_queue_remaining;  /* free slots in the driver TX queue */
+        uint32_t rx_queue_waiting;    /* frames waiting for the Rx task */
+        uint32_t rx_queue_overflow;   /* frames dropped because the RX queue was full */
+        uint32_t tx_failed;           /* frames the controller reported as not sent */
+        uint32_t bus_off_count;       /* bus-off events (each triggers a recovery) */
+    } CO_CANstats_t;
+
+    /* Fills a snapshot of the TWAI node state and driver counters. Safe to call from any task. */
+    void CO_CANgetStats(CO_CANstats_t *stats);
 
     /* Received message object */
     typedef struct

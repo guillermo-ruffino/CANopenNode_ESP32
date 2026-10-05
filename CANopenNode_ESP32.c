@@ -264,6 +264,14 @@ static void CO_periodicTask(void *pxParam)
         xSemaphoreTake(xPeriodicTaskSemaphore, pdMS_TO_TICKS(1));
         if ((!CO->nodeIdUnconfigured) && (CO->CANmodule->CANnormal))
         {
+            /* PDO processing reads/writes mapped OD variables and the TPDO request
+             * flags (OD_extension_t.flagsPDO) from this task, while application
+             * tasks (possibly on the other core) write the same variables and call
+             * OD_requestTPDO(). Both sides do non-atomic read-modify-writes on the
+             * shared flag byte, so without the lock an application request can be
+             * overwritten and its TPDO never sent. Applications must also wrap their
+             * OD writes + OD_requestTPDO() in CO_LOCK_OD()/CO_UNLOCK_OD(). */
+            CO_LOCK_OD(CO->CANmodule);
             bool syncWas = false;
 #if (CO_CONFIG_SYNC) & CO_CONFIG_SYNC_ENABLE
             syncWas = CO_process_SYNC(CO, CO_PERIODIC_TASK_INTERVAL_US, NULL);
@@ -274,6 +282,7 @@ static void CO_periodicTask(void *pxParam)
 #if (CO_CONFIG_PDO) & CO_CONFIG_TPDO_ENABLE
             CO_process_TPDO(CO, syncWas, CO_PERIODIC_TASK_INTERVAL_US, NULL);
 #endif
+            CO_UNLOCK_OD(CO->CANmodule);
         }
     }
 }
